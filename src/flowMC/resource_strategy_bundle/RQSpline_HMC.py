@@ -18,6 +18,7 @@ from flowMC.strategy.take_steps import TakeSerialSteps, TakeGroupSteps
 from flowMC.strategy.train_model import TrainModel
 from flowMC.strategy.update_state import UpdateState
 from flowMC.strategy.adapt_step_size import AdaptStepSize
+from flowMC.strategy.check_early_stop import CheckEarlyStop
 from flowMC.resource_strategy_bundle.base import ResourceStrategyBundle
 
 
@@ -58,6 +59,9 @@ class RQSpline_HMC_Bundle(ResourceStrategyBundle):
         global_thinning: int = 1,
         n_NFproposal_batch_size: int = 10000,
         adapt_step_size: bool = True,
+        early_stopping: bool = False,
+        early_stopping_tolerance: float = 0.05,
+        early_stopping_patience: int = 3,
         history_window: int = 100,
         verbose: bool = False,
     ):
@@ -144,6 +148,7 @@ class RQSpline_HMC_Bundle(ResourceStrategyBundle):
                 "target_local_accs": "local_accs_training",
                 "target_global_accs": "global_accs_training",
                 "training": True,
+                "early_stopped": False,
             },
             name="sampler_state",
         )
@@ -288,6 +293,16 @@ class RQSpline_HMC_Bundle(ResourceStrategyBundle):
             verbose=verbose,
         )
 
+        check_early_stop = CheckEarlyStop(
+            state_name="sampler_state",
+            acceptance_buffer_key="target_global_accs",
+            relative_tolerance=early_stopping_tolerance,
+            acceptance_window=n_global_steps * 3 // global_thinning,
+            n_loops_skip=int(0.15 * n_training_loops),
+            patience=early_stopping_patience,
+            verbose=verbose,
+        )
+
         self.strategies = {
             "local_stepper": local_stepper,
             "global_stepper": global_stepper,
@@ -298,6 +313,7 @@ class RQSpline_HMC_Bundle(ResourceStrategyBundle):
             "reset_steppers": reset_steppers_lambda,
             "update_model": update_model_lambda,
             "adapt_local_sampler": adapt_local_sampler,
+            "check_early_stop": check_early_stop,
         }
 
         training_phase = [
@@ -308,6 +324,7 @@ class RQSpline_HMC_Bundle(ResourceStrategyBundle):
             "update_model",
             "global_stepper",
             "update_local_step",
+            *(("check_early_stop",) if early_stopping else []),
         ]
         production_phase = [
             "local_stepper",

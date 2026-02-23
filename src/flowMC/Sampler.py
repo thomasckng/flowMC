@@ -5,6 +5,7 @@ import logging
 
 from flowMC.strategy.base import Strategy
 from flowMC.resource.base import Resource
+from flowMC.resource.states import State
 from flowMC.resource_strategy_bundle.base import ResourceStrategyBundle
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,22 @@ class Sampler:
         rng_key = self.rng_key
         last_step = initial_position
         assert isinstance(self.strategy_order, list)
+
+        skip_to_production = False
+
         for strategy in self.strategy_order:
+            # Early-stop skip: jump over remaining training strategies
+            # until we reach "reset_steppers" (the training→production boundary)
+            if skip_to_production:
+                if strategy == "reset_steppers":
+                    skip_to_production = False
+                    logger.info(
+                        "[Early stop] Remaining training loops skipped. "
+                        "Starting production phase."
+                    )
+                else:
+                    continue
+
             if strategy not in self.strategies:
                 raise ValueError(
                     f"Invalid strategy name '{strategy}' provided. "
@@ -105,6 +121,19 @@ class Sampler:
                 self.resources,
                 last_step,
             ) = self.strategies[strategy](rng_key, self.resources, last_step, data)
+
+            # Check if any State resource has early_stopped flag set
+            if not skip_to_production:
+                for resource in self.resources.values():
+                    if isinstance(resource, State) and resource.data.get(
+                        "early_stopped", False
+                    ):
+                        skip_to_production = True
+                        logger.info(
+                            "[Early stop] Early stop triggered — "
+                            "skipping remaining training loops."
+                        )
+                        break
 
     # TODO: Implement quick access and summary functions that operates on buffer
 
