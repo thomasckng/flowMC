@@ -356,7 +356,7 @@ class RQSpline_MALA_PT_Bundle(ResourceStrategyBundle):
             acceptance_buffer_key="target_local_accs",
             target_acceptance_rate=0.574,
             acceptance_window=n_local_steps,
-            n_loops_skip=int(0.15 * n_training_loops),
+            n_loops_skip=3,
             verbose=verbose,
         )
 
@@ -365,7 +365,7 @@ class RQSpline_MALA_PT_Bundle(ResourceStrategyBundle):
             acceptance_buffer_key="target_global_accs",
             relative_tolerance=early_stopping_tolerance,
             acceptance_window=n_global_steps * 3 // global_thinning,
-            n_loops_skip=int(0.15 * n_training_loops),
+            n_loops_skip=3,
             patience=early_stopping_patience,
             verbose=verbose,
         )
