@@ -104,6 +104,15 @@ class Sampler:
             if skip_to_production:
                 if strategy == "reset_steppers":
                     skip_to_production = False
+                    # Clear the early_stopped flag on all State resources so the
+                    # post-strategy scan does not re-enable skip_to_production for
+                    # update_state and every subsequent production strategy.
+                    for resource in self.resources.values():
+                        if (
+                            isinstance(resource, State)
+                            and "early_stopped" in resource.data
+                        ):
+                            resource.data["early_stopped"] = False
                     logger.info(
                         "[Early stop] Remaining training loops skipped. "
                         "Starting production phase."
@@ -123,7 +132,7 @@ class Sampler:
             ) = self.strategies[strategy](rng_key, self.resources, last_step, data)
 
             # Check if any State resource has early_stopped flag set
-            if not skip_to_production and strategy != "reset_steppers":
+            if not skip_to_production:
                 for resource in self.resources.values():
                     if isinstance(resource, State) and resource.data.get(
                         "early_stopped", False
