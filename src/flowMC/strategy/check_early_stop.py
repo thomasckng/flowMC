@@ -133,9 +133,7 @@ class CheckEarlyStop(Strategy):
             finite_accs = finite_accs[:, -self.acceptance_window :]
 
         if finite_accs.shape[1] == 0:
-            logger.debug(
-                "No acceptance data recorded yet — skipping early-stop check."
-            )
+            logger.debug("No acceptance data recorded yet — skipping early-stop check.")
             return rng_key, resources, initial_position
 
         current_acceptance = float(jnp.mean(finite_accs))
@@ -161,9 +159,7 @@ class CheckEarlyStop(Strategy):
         mean_change = abs(current_acceptance - self._prev_acceptance) / max(
             abs(self._prev_acceptance), 1e-8
         )
-        cov_change = abs(current_cov - self._prev_cov) / max(
-            abs(self._prev_cov), 1e-8
-        )
+        cov_change = abs(current_cov - self._prev_cov) / max(abs(self._prev_cov), 1e-8)
 
         logger.debug(
             f"[Early stop] Loop {self._call_count}: "

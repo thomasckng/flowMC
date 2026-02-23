@@ -123,7 +123,7 @@ class Sampler:
             ) = self.strategies[strategy](rng_key, self.resources, last_step, data)
 
             # Check if any State resource has early_stopped flag set
-            if not skip_to_production:
+            if not skip_to_production and strategy != "reset_steppers":
                 for resource in self.resources.values():
                     if isinstance(resource, State) and resource.data.get(
                         "early_stopped", False

@@ -940,3 +940,163 @@ class TestAdaptStepSize:
         assert jnp.all(jnp.isfinite(new_step_size)), (
             "Step size should remain finite even with non-finite acceptance values"
         )
+
+
+def _make_early_stop_resources(n_chains=10, n_steps=100, global_acc_value=None):
+    state = State(
+        {
+            "target_global_accs": "global_accs_training",
+            "training": True,
+            "early_stopped": False,
+        },
+        name="sampler_state",
+    )
+    buffer = Buffer("global_accs_training", (n_chains, n_steps), 1)
+    if global_acc_value is not None:
+        buffer.data = jnp.full((n_chains, n_steps), global_acc_value)
+    return {"sampler_state": state, "global_accs_training": buffer}
+
+
+class TestCheckEarlyStop:
+    """Core tests for the CheckEarlyStop strategy and the Sampler skip logic."""
+
+    def test_triggers_when_stable_after_warmup(self):
+        """Early stop fires when both mean and CoV are unchanged after warmup."""
+        from flowMC.strategy.check_early_stop import CheckEarlyStop
+
+        strategy = CheckEarlyStop(
+            state_name="sampler_state",
+            acceptance_buffer_key="target_global_accs",
+            relative_tolerance=0.05,
+            n_loops_skip=1,
+            patience=1,
+        )
+        resources = _make_early_stop_resources(global_acc_value=0.5)
+        key = jax.random.key(0)
+        pos = jnp.zeros((10, 2))
+
+        # Warmup loop
+        key, resources, pos = strategy(key, resources, pos, {})
+        assert resources["sampler_state"].data["early_stopped"] is False  # type: ignore[index]
+
+        # Second loop — identical data, relative change = 0 → triggers
+        key, resources, pos = strategy(key, resources, pos, {})
+        assert resources["sampler_state"].data["early_stopped"] is True  # type: ignore[index]
+
+    def test_no_trigger_when_acceptance_changing(self):
+        """Early stop does not fire when the mean acceptance shifts significantly."""
+        from flowMC.strategy.check_early_stop import CheckEarlyStop
+
+        strategy = CheckEarlyStop(
+            state_name="sampler_state",
+            acceptance_buffer_key="target_global_accs",
+            relative_tolerance=0.01,
+            n_loops_skip=1,
+            patience=1,
+        )
+        resources = _make_early_stop_resources(global_acc_value=0.3)
+        key = jax.random.key(0)
+        pos = jnp.zeros((10, 2))
+
+        key, resources, pos = strategy(key, resources, pos, {})
+        assert resources["sampler_state"].data["early_stopped"] is False  # type: ignore[index]
+
+        # Big jump → no trigger
+        resources["global_accs_training"].data = jnp.full((10, 100), 0.6)  # type: ignore[union-attr]
+        key, resources, pos = strategy(key, resources, pos, {})
+        assert resources["sampler_state"].data["early_stopped"] is False  # type: ignore[index]
+
+    def test_no_trigger_when_cov_changing_but_mean_stable(self):
+        """Early stop does not fire when mean is stable but CoV changes.
+
+        Warmup: uniform 0.5 across all chains (CoV = 0).
+        Check:  split 0.3 / 0.7 (mean = 0.5, CoV >> 0) → no trigger.
+        """
+        from flowMC.strategy.check_early_stop import CheckEarlyStop
+
+        strategy = CheckEarlyStop(
+            state_name="sampler_state",
+            acceptance_buffer_key="target_global_accs",
+            relative_tolerance=0.05,
+            n_loops_skip=1,
+            patience=1,
+        )
+        resources = _make_early_stop_resources(n_chains=10, n_steps=100, global_acc_value=0.5)
+        key = jax.random.key(0)
+        pos = jnp.zeros((10, 2))
+
+        key, resources, pos = strategy(key, resources, pos, {})
+
+        resources["global_accs_training"].data = jnp.concatenate(  # type: ignore[union-attr]
+            [jnp.full((5, 100), 0.3), jnp.full((5, 100), 0.7)], axis=0
+        )
+        key, resources, pos = strategy(key, resources, pos, {})
+        assert resources["sampler_state"].data["early_stopped"] is False  # type: ignore[index]
+
+    def test_reset_steppers_does_not_re_trigger_skip(self):
+        """Production strategies must run after reset_steppers even when early stopped.
+
+        Regression: the post-strategy scan would fire immediately after
+        reset_steppers (skip_to_production=False at that point) and re-enable
+        skip_to_production because early_stopped is still True in State.
+        """
+        from flowMC.Sampler import Sampler
+        from flowMC.strategy.base import Strategy
+
+        execution_log: list[str] = []
+
+        class RecordingStrategy(Strategy):
+            def __init__(self, name: str):
+                self.name = name
+
+            def __call__(self, rng_key, resources, initial_position, data):
+                execution_log.append(self.name)
+                return rng_key, resources, initial_position
+
+        class TriggerEarlyStop(Strategy):
+            def __init__(self):
+                pass
+
+            def __call__(self, rng_key, resources, initial_position, data):
+                execution_log.append("trigger_early_stop")
+                resources["sampler_state"].data["early_stopped"] = True
+                return rng_key, resources, initial_position
+
+        class ResetSteppers(Strategy):
+            def __init__(self):
+                pass
+
+            def __call__(self, rng_key, resources, initial_position, data):
+                execution_log.append("reset_steppers")
+                return rng_key, resources, initial_position
+
+        resources = {
+            "sampler_state": State({"early_stopped": False}, name="sampler_state")
+        }
+        strategies = {
+            "training_step": RecordingStrategy("training_step"),
+            "trigger_early_stop": TriggerEarlyStop(),
+            "reset_steppers": ResetSteppers(),
+            "production_step": RecordingStrategy("production_step"),
+        }
+        strategy_order = [
+            "training_step",
+            "trigger_early_stop",
+            "training_step",  # should be skipped
+            "reset_steppers",
+            "production_step",
+        ]
+
+        sampler = Sampler.__new__(Sampler)
+        sampler.rng_key = jax.random.key(0)
+        sampler.resources = resources
+        sampler.strategies = strategies
+        sampler.strategy_order = strategy_order
+        sampler.sample(jnp.zeros((2, 2)), {})
+
+        assert "production_step" in execution_log, (
+            "production_step was skipped; reset_steppers incorrectly re-triggered skip_to_production"
+        )
+        assert execution_log.count("training_step") == 1, (
+            "The second training_step should have been skipped by early stopping"
+        )
