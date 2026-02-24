@@ -229,8 +229,7 @@ class CheckEarlyStop(Strategy):
                         f"min target {self.min_acceptance_rate:.4f}"
                     )
                 logger.debug(
-                    f"[Early stop] Patience counter reset "
-                    f"({', '.join(reason)})."
+                    f"[Early stop] Patience counter reset ({', '.join(reason)})."
                 )
             self._patience_count = 0
 
