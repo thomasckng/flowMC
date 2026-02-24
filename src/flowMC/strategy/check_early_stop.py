@@ -29,22 +29,24 @@ class CheckEarlyStop(Strategy):
     state_name: str
     acceptance_buffer_key: str
     relative_tolerance: float
+    min_acceptance_rate: float
     acceptance_window: int
     n_loops_skip: int
     patience: int
     _call_count: int
     _prev_acceptance: float | None
     _prev_cov: float | None
-    _stable_count: int
+    _patience_count: int
 
     def __init__(
         self,
         state_name: str,
         acceptance_buffer_key: str = "target_global_accs",
-        relative_tolerance: float = 0.05,
+        relative_tolerance: float = 0.1,
+        min_acceptance_rate: float = 0.1,
         acceptance_window: int = 0,
-        n_loops_skip: int = 2,
-        patience: int = 1,
+        n_loops_skip: int = 3,
+        patience: int = 3,
         verbose: bool = False,
     ):
         """Initialize the CheckEarlyStop strategy.
@@ -55,6 +57,10 @@ class CheckEarlyStop(Strategy):
                 acceptance buffer name (e.g., ``"target_global_accs"``).
             relative_tolerance: Relative change threshold. Early stopping
                 triggers when ``|current - prev| / max(prev, 1e-8) < tol``.
+            min_acceptance_rate: Minimum global acceptance rate threshold.
+                Early stopping triggers immediately when the current mean
+                acceptance rate reaches or exceeds this value, regardless of
+                stability. Set to 0 to disable this condition.
             acceptance_window: Number of most-recent thinned steps to use
                 when computing the mean acceptance rate. If 0 (default), all
                 available finite entries are used. Set this to
@@ -71,13 +77,14 @@ class CheckEarlyStop(Strategy):
         self.state_name = state_name
         self.acceptance_buffer_key = acceptance_buffer_key
         self.relative_tolerance = relative_tolerance
+        self.min_acceptance_rate = min_acceptance_rate
         self.acceptance_window = acceptance_window
         self.n_loops_skip = max(n_loops_skip, 1)
         self.patience = max(patience, 1)
         self._call_count = 0
         self._prev_acceptance = None
         self._prev_cov = None
-        self._stable_count = 0
+        self._patience_count = 0
         if verbose:
             enable_verbose_logging(logger)
 
@@ -172,35 +179,60 @@ class CheckEarlyStop(Strategy):
 
         mean_stable = mean_change < self.relative_tolerance
         cov_stable = cov_change < self.relative_tolerance
+        rate_reached = (
+            self.min_acceptance_rate > 0
+            and current_acceptance >= self.min_acceptance_rate
+        )
 
-        if mean_stable and cov_stable:
-            self._stable_count += 1
-            logger.debug(
-                f"[Early stop] Both acceptance mean and CoV are stable "
-                f"({self._stable_count}/{self.patience} consecutive loop(s) required)"
-            )
-            if self._stable_count >= self.patience:
-                logger.info(
-                    f"[Early stop] Training stopped early at loop {self._call_count}: "
-                    f"global acceptance mean and CoV have both been stable for "
-                    f"{self.patience} consecutive loop(s) "
-                    f"(mean change {mean_change:.4%}, CoV change {cov_change:.4%}, "
-                    f"threshold {self.relative_tolerance:.4%}). "
-                    f"Proceeding to production phase."
+        if (mean_stable and cov_stable) or rate_reached:
+            self._patience_count += 1
+            if rate_reached:
+                logger.debug(
+                    f"[Early stop] Acceptance {current_acceptance:.4f} >= "
+                    f"min target {self.min_acceptance_rate:.4f} "
+                    f"({self._patience_count}/{self.patience} consecutive loop(s) required)"
                 )
+            else:
+                logger.debug(
+                    f"[Early stop] Both acceptance mean and CoV are stable "
+                    f"({self._patience_count}/{self.patience} consecutive loop(s) required)"
+                )
+            if self._patience_count >= self.patience:
+                if rate_reached:
+                    logger.info(
+                        f"[Early stop] Training stopped early at loop {self._call_count}: "
+                        f"global acceptance {current_acceptance:.4f} reached the "
+                        f"minimum target {self.min_acceptance_rate:.4f} for "
+                        f"{self.patience} consecutive loop(s). "
+                        f"Proceeding to production phase."
+                    )
+                else:
+                    logger.info(
+                        f"[Early stop] Training stopped early at loop {self._call_count}: "
+                        f"global acceptance mean and CoV have both been stable for "
+                        f"{self.patience} consecutive loop(s) "
+                        f"(mean change {mean_change:.4%}, CoV change {cov_change:.4%}, "
+                        f"threshold {self.relative_tolerance:.4%}). "
+                        f"Proceeding to production phase."
+                    )
                 state.data["early_stopped"] = True
         else:
-            if self._stable_count > 0:
+            if self._patience_count > 0:
                 reason = []
                 if not mean_stable:
                     reason.append(f"mean changed by {mean_change:.4%}")
                 if not cov_stable:
                     reason.append(f"CoV changed by {cov_change:.4%}")
+                if not rate_reached and self.min_acceptance_rate > 0:
+                    reason.append(
+                        f"acceptance {current_acceptance:.4f} below "
+                        f"min target {self.min_acceptance_rate:.4f}"
+                    )
                 logger.debug(
-                    f"[Early stop] Not stable ({', '.join(reason)}) — "
-                    f"resetting stability counter."
+                    f"[Early stop] Patience counter reset "
+                    f"({', '.join(reason)})."
                 )
-            self._stable_count = 0
+            self._patience_count = 0
 
         self._prev_acceptance = current_acceptance
         self._prev_cov = current_cov

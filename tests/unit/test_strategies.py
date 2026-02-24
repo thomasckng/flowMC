@@ -991,6 +991,7 @@ class TestCheckEarlyStop:
             state_name="sampler_state",
             acceptance_buffer_key="target_global_accs",
             relative_tolerance=0.01,
+            min_acceptance_rate=0.0,  # disable threshold; test stability only
             n_loops_skip=1,
             patience=1,
         )
@@ -1018,6 +1019,7 @@ class TestCheckEarlyStop:
             state_name="sampler_state",
             acceptance_buffer_key="target_global_accs",
             relative_tolerance=0.05,
+            min_acceptance_rate=0.0,  # disable threshold; test stability only
             n_loops_skip=1,
             patience=1,
         )

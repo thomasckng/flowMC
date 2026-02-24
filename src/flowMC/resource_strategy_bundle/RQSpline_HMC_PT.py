@@ -70,6 +70,7 @@ class RQSpline_HMC_PT_Bundle(ResourceStrategyBundle):
         early_stopping: bool = False,
         early_stopping_tolerance: float = 0.05,
         early_stopping_patience: int = 3,
+        early_stopping_min_acceptance: float = 0.1,
         history_window: int = 100,
         n_temperatures: int = 5,
         max_temperature: float = 5.0,
@@ -371,6 +372,7 @@ class RQSpline_HMC_PT_Bundle(ResourceStrategyBundle):
             acceptance_window=n_global_steps * 3 // global_thinning,
             n_loops_skip=3,
             patience=early_stopping_patience,
+            min_acceptance_rate=early_stopping_min_acceptance,
             verbose=verbose,
         )
 
