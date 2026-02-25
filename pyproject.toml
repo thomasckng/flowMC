@@ -5,9 +5,12 @@ description = "Normalizing flow exhanced sampler in jax"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
-    { name = "Kaze Wong", email = "kazewong.physics@gmail.com"},
+    { name = "Kaze W. K. Wong", email = "kazewong.physics@gmail.com"},
     { name = "Marylou Gabrié"},
     { name = "Dan Foreman-Mackey"}
+]
+maintainers = [
+  {name = "Thomas Ng", email = "thomas.ng@nikhef.nl"}
 ]
 license = { file = "LICENSE" }
 classifiers = [

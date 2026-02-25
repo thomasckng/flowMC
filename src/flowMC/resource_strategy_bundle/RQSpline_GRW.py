@@ -241,16 +241,14 @@ class RQSpline_GRW_Bundle(ResourceStrategyBundle):
         )
 
         update_global_step = Lambda(
-            lambda rng_key,
-            resources,
-            initial_position,
-            data: global_stepper.set_current_position(local_stepper.current_position)
+            lambda rng_key, resources, initial_position, data: (
+                global_stepper.set_current_position(local_stepper.current_position)
+            )
         )
         update_local_step = Lambda(
-            lambda rng_key,
-            resources,
-            initial_position,
-            data: local_stepper.set_current_position(global_stepper.current_position)
+            lambda rng_key, resources, initial_position, data: (
+                local_stepper.set_current_position(global_stepper.current_position)
+            )
         )
 
         def update_model(
